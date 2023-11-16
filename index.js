@@ -7,77 +7,115 @@ const app = express();
 
 app.use(bodyParser.urlencoded({ extended: true }));
 
-let selectedArtDepartment;
-let artDepartments;
 
-let artworksIDs;
-let randomArtworks = [];
+var departments;
+var departmentId;
 
-/*#########Custom Middlewares########*/
+var artworksArr = [];
+var selectedArtwork;
 
-async function getArtworksIds(req, res, next) {
-    selectedArtDepartment = req.body["departmentId"];
+//############# FUNCIONES #############//
 
+async function getDepartments() {
     try {
-        const idsResponse = await axios.get(`https://collectionapi.metmuseum.org/public/collection/v1/objects?departmentIds=${selectedArtDepartment}`);
-        artworksIDs = idsResponse.data["objectIDs"];
+        const response = await axios.get("https://collectionapi.metmuseum.org/public/collection/v1/departments");
+        return response.data["departments"];
     } catch (error) {
-        console.error("Request failure: " + error.message);
+        
     }
-    next();
 }
 
-async function getRandomArtworksById(req, res, next) {
-    
-    randomArtworks.splice(0,randomArtworks.length); //* empty the array of artwork objects // vaciar el array con objetos obras de arte.
-    let min = artworksIDs[0];
-    let max = artworksIDs[artworksIDs.length-1];
+async function getArtworksId() {
+    try {
+        const response = await axios.get(`https://collectionapi.metmuseum.org/public/collection/v1/objects?departmentIds=${departmentId}`);
+        return response.data["objectIDs"];
+    } catch (error) {
+        console.error("Request Failure: " + error.message);
+    }
+}
+
+function getRandomId(arr) {
+    let min = arr[0];
+    let max = arr[arr.length - 1];
+
+    return Math.floor(Math.random() * (max - min) + min);
+
+}
+
+async function getArtworks() {
+    const idArr = await getArtworksId();
 
     let counter = 0;
 
-    while (counter < 10) {
-        const randomId = Math.floor(Math.random() * (max - min) + min);
-        
+    while (counter < 8) {
+        const randomId = getRandomId(idArr);
         try {
-            let response = await axios.get(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${randomId}`);
-            const artwork = response.data;
-            if (artwork.primaryImage) {
-                counter++;
-                randomArtworks.push({
-                    id: artwork["objectID"],
-                    image: artwork["primaryImage"],
-                    title: artwork["title"],
-                    artist: artwork["artistDisplayName"]
+            const response = await axios.get(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${randomId}`);
+            if (response.data["primaryImageSmall"] && response.data["artistDisplayName"]) {
+                artworksArr.push({
+                    id: response.data["objectID"],
+                    title: response.data["title"],
+                    artist: response.data["artistDisplayName"],
+                    image: response.data["primaryImageSmall"]
                 })
+
+                counter++;
             }
         } catch (error) {}
+    }
+
+}
+
+//############# REQUESTS ############//
+
+app.use(getInfo);
+
+app.get("/", async (req, res) => {
+    res.render("index.ejs", { departments, artworks: artworksArr })
+})
+
+app.post("/submit", (req, res) => {
+    res.render("index.ejs", { departments, artworks: artworksArr });
+})
+
+app.use(getArtwork);
+
+app.post("/artwork", async (req, res) => {
+    try {
+
+        console.log("Artwork seleccionado: " + selectedArtwork);
+
+        const response = await axios.get(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${selectedArtwork}`);
+        const artwork = {
+            title: response.data["title"],
+            artist: response.data["artistDisplayName"],
+            beginDate: response.data["objectBeginDate"],
+            endDate: response.data["objectEndDate"],
+            image: response.data["primaryImageSmall"],
+        }
+
+        res.render("artwork.ejs", artwork);
+    } catch (error) {
+        console.error("Failure Request: " + error.message);
+    }
+    
+})
+
+//############# MIDDLEWARES ############//
+
+async function getInfo(req, res, next) {
+    departments = await getDepartments();
+    departmentId = req.body["departmentId"];
+    if (departmentId) {
+        await getArtworks();
     }
     next();
 }
 
-/*########Requests########*/
-
-app.get("/", async (req, res) => {
-    console.log("Desde / :" , randomArtworks);
-    try {
-        const response = await axios.get("https://collectionapi.metmuseum.org/public/collection/v1/departments");
-        artDepartments = response.data.departments;
-
-        res.render("index.ejs", { departments: artDepartments, selectedDepartment: selectedArtDepartment, artworks: randomArtworks });
-    } catch (error) {
-        res.send(error.message);
-    }
-
-})
-
-app.use(getArtworksIds);
-
-app.use(getRandomArtworksById);
-
-app.post("/submit", async (req, res) => {
-
-    res.redirect("/");
-})
+function getArtwork(req, res, next) {
+    selectedArtwork = req.body["artworkId"];
+    next();
+}
 
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
